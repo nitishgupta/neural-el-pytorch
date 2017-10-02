@@ -1,0 +1,22 @@
+Coherence Stirng set Size : 3516618, cnt > 1 size : 2177735
+Val Mens : 1227312 Coherence Less mentions : 605
+Test Mens : 613656 Coherence Less mentions : 305
+Val Mens : 1227312 Coherence Less mentions : 1351
+Test Mens : 613656 Coherence Less mentions : 694
+/save/ngupta19/datasets/ACE/wcoh/mentions_inkb.txt
+Total Mens : 248  Coherence Less Mentions : 0
+/save/ngupta19/datasets/ACE/wcoh/mentions_inkb.txt
+Total Mens : 248  Coherence Less Mentions : 0
+/save/ngupta19/datasets/AIDA/wcoh/inkb_mentions/mentions_dev_inkb.txt
+Total Mens : 4674  Coherence Less Mentions : 5
+/save/ngupta19/datasets/AIDA/wcoh/inkb_mentions/mentions_test_inkb.txt
+Total Mens : 4334  Coherence Less Mentions : 2
+/save/ngupta19/datasets/AIDA/wcoh/inkb_mentions/mentions_train_inkb.txt
+Total Mens : 18033  Coherence Less Mentions : 26
+/save/ngupta19/datasets/AIDA/wcoh/inkb_mentions/mentions_dev_inkb.txt
+Total Mens : 4674  Coherence Less Mentions : 5
+/save/ngupta19/datasets/AIDA/wcoh/inkb_mentions/mentions_test_inkb.txt
+Total Mens : 4334  Coherence Less Mentions : 2
+/save/ngupta19/datasets/AIDA/wcoh/inkb_mentions/mentions_train_inkb.txt
+Total Mens : 18033  Coherence Less Mentions : 26
+

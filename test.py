@@ -90,7 +90,7 @@ if __name__=='__main__':
         lr=0.1)
 
     for i in range(0, 10000):
-        cands = np.random.randint(low=0, high=10, size=(bs, num_cands))
+        cands = np.random.randint(low=0, high=numens, size=(bs, num_cands))
         cands = Variable(torch.LongTensor(cands))
         cands = cands.cuda(0)
 

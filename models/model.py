@@ -58,6 +58,11 @@ class ELModel(nn.Module):
         self.entityembeds.weight.data.uniform_(-self.init_range,
                                                self.init_range)
 
+    def _cuda(self, m):
+        if self.device_id is not None:
+           return m.cuda(self.device_id)
+        return m
+
     def forward_context(self, **kargs):
         left_context = kargs['leftb']
         right_context = kargs['rightb']
@@ -75,6 +80,7 @@ class ELModel(nn.Module):
             doc_input=sparse_doc_vecs)
         '''
         context_encoded = Variable(torch.randn(bs, self.edim))
+        context_encoded = context_encoded.cuda(0)
 
         # [B, T]
         mentype_probs = self.typeencoder.forward(context_encoded)

@@ -86,7 +86,8 @@ class TrainingDataReader(object):
         # Train / Validation Candidates : 30 per mention
         # {(lnrm(surface), wid): ([cand_wid_idxs], [prior_probs])}
         self.trval_cands_dict = vocabloader.getTrainValCandidateDict()
-        print("[#] Size of Train : {}".format(len(self.trval_cands_dict)))
+        print("[#] Size of Train Cands Dict: {}".format(
+            len(self.trval_cands_dict)))
 
         self.tr_mens_dir = config.train_mentions_dir
         self.tr_mens_files = utils.get_mention_files(self.tr_mens_dir)
@@ -94,8 +95,7 @@ class TrainingDataReader(object):
         print("[#] Training Mention Files : {} files".format(
             self.num_tr_mens_files))
 
-        print("[#] Validation Mentions File : {}".format(
-           val_file))
+        print("[#] Validation Mentions File : {}".format(val_file))
 
         self.tr_mentions = []
         self.tr_men_idx = 0
@@ -114,7 +114,8 @@ class TrainingDataReader(object):
 
         if self.pretrain_wordembed:
             vtime = time.time()
-            self.word2vec = vocabloader.loadGloveVectors()
+            self.glovenumpy = vocabloader.loadGloveNumpy()
+            # self.word2vec = vocabloader.loadGloveVectors()
             print("[#] Glove Vectors loaded!")
             ttime = (time.time() - vtime)/float(60)
             print("[#] Time to load vectors : {} mins".format(ttime))
@@ -124,34 +125,28 @@ class TrainingDataReader(object):
         print("[#] TRAINING READER LOADING COMPLETE. "
               "Time Taken: {} secs\n".format(ttime))
 
-    def get_vector(self, word):
-        if word in self.word2vec:
-            return self.word2vec[word]
-        else:
-            return self.word2vec['unk']
-
     def load_mentions_from_file(self, data_idx=0):
         print("[#] Loading mentions from file")
-        if data_idx==0 or data_idx=="tr":
-            stime = time.time()
-            if self.tr_fnum == self.num_tr_mens_files:
-                self.tr_fnum = 0
-                self.tr_epochs += 1
-                # random.shuffle(mens_files)
-            filepath = os.path.join(self.tr_mens_dir,
-                                    self.tr_mens_files[self.tr_fnum])
-            self.tr_fnum += 1
-            # self.tr_mens is a list of objects of Mention class
-            self.tr_mens = utils.make_mentions_from_file(filepath)
-            self.num_tr_mens = len(self.tr_mens)
-            self.tr_men_idx = 0
-            ttime = (time.time() - stime)
-            print("[#] File Number loaded : {}".format(self.tr_fnum))
-            print("[#] Loaded tr mentions. Num of mentions: {} "
-                  "Time: {:.2f} secs".format(self.num_tr_mens, ttime))
-        else:
+        if not (data_idx == 0 or data_idx == "tr"):
             print("Wrong Datatype. Exiting.")
             sys.exit(0)
+
+        stime = time.time()
+        if self.tr_fnum == self.num_tr_mens_files:
+            self.tr_fnum = 0
+            self.tr_epochs += 1
+            # random.shuffle(mens_files)
+        filepath = os.path.join(self.tr_mens_dir,
+                                self.tr_mens_files[self.tr_fnum])
+        self.tr_fnum += 1
+        # self.tr_mens is a list of objects of Mention class
+        self.tr_mens = utils.make_mentions_from_file(filepath)
+        self.num_tr_mens = len(self.tr_mens)
+        self.tr_men_idx = 0
+        ttime = (time.time() - stime)
+        print("[#] File Number loaded : {}".format(self.tr_fnum))
+        print("[#] Loaded tr mentions. Num of mentions: {} "
+              "Time: {:.2f} secs".format(self.num_tr_mens, ttime))
 
     def reset_validation(self):
         self.val_men_idx = 0
@@ -190,6 +185,8 @@ class TrainingDataReader(object):
         sys.exit(0)
     # enddef
 
+
+    #@profile
     def _next_batch(self, data_type):
         ''' Data : wikititle \t mid \t wid \t start \t end \t tokens \t labels
         start and end are inclusive
@@ -228,9 +225,9 @@ class TrainingDataReader(object):
                     labels_batch[batch_el][labelidx] = 1.0
 
             # Document Context Batch
-            cohFound = False    # If no coherence mention is found, add unk
-            cohidxs = []  # Indexes in the [B, NumCoh] matrix
-            cohvals = []  # 1.0 to indicate presence
+            cohidxs = []
+            cohvals = []
+            cohFound = False
             for cohstr in m.coherence:
                 r = random.random()
                 if cohstr in self.cohG92idx and r < self.cohDropoutKeep:
@@ -258,14 +255,13 @@ class TrainingDataReader(object):
             left_tokens = self.wordDropout(left_tokens, self.wordDropoutKeep)
             right_tokens = self.wordDropout(right_tokens, self.wordDropoutKeep)
 
-            if not self.pretrain_wordembed:
-                left_idxs = [self.convert_word2idx(word)
-                             for word in left_tokens]
-                right_idxs = [self.convert_word2idx(word)
-                              for word in right_tokens]
-            else:
-                left_idxs = left_tokens
-                right_idxs = right_tokens
+            left_idxs = [self.convert_word2idx(word)
+                         for word in left_tokens]
+            right_idxs = [self.convert_word2idx(word)
+                          for word in right_tokens]
+            # else:
+            #     left_idxs = left_tokens
+            #     right_idxs = right_tokens
 
             left_batch.append(left_idxs)
             right_batch.append(right_idxs)
@@ -294,7 +290,7 @@ class TrainingDataReader(object):
 
     def wordDropout(self, list_tokens, dropoutkeeprate):
         if dropoutkeeprate < 1.0:
-            for i in range(0,len(list_tokens)):
+            for i in range(0, len(list_tokens)):
                 r = random.random()
                 if r > dropoutkeeprate:
                     list_tokens[i] = self.unk_word
@@ -320,16 +316,27 @@ class TrainingDataReader(object):
                 neg_ents.append(neg)
         return neg_ents
 
+    # def embed_batch(self, batch):
+    #     ''' Input is a padded batch of left or right contexts containing words
+    #     Dimensions should be [B, padded_length]
+    #     Output:
+    #       Embed the word idxs using pretrain word embedding
+    #     '''
+    #     output_batch = []
+    #     for sent in batch:
+    #         word_embeddings = [self.get_vector(word) for word in sent]
+    #         output_batch.append(word_embeddings)
+    #     return output_batch
+
     def embed_batch(self, batch):
-        ''' Input is a padded batch of left or right contexts containing words
+        ''' Input is a padded batch of left or right contexts containing
+        wordidx
         Dimensions should be [B, padded_length]
         Output:
           Embed the word idxs using pretrain word embedding
         '''
-        output_batch = []
-        for sent in batch:
-            word_embeddings = [self.get_vector(word) for word in sent]
-            output_batch.append(word_embeddings)
+        batch = np.array(batch, dtype=np.int32)  # this is needed
+        output_batch = self.glovenumpy[batch]
         return output_batch
 
     def deprecated_embed_mentions_batch(self, mentions_batch):
@@ -345,15 +352,13 @@ class TrainingDataReader(object):
         return embedded_mentions_batch
 
     def pad_batch(self, batch):
-        if not self.pretrain_wordembed:
-            pad_unit = self.word2idx[self.unk_word]
-        else:
-            pad_unit = self.unk_word
+        pad_unit = self.word2idx[self.unk_word]
         lengths = [len(i) for i in batch]
         max_length = max(lengths)
         for i in range(0, len(batch)):
             batch[i].extend([pad_unit]*(max_length - lengths[i]))
         return (batch, lengths)
+
 
     def _next_padded_batch(self, data_type):
         (left_batch, right_batch,
@@ -367,13 +372,9 @@ class TrainingDataReader(object):
             right_batch = self.embed_batch(right_batch)
             # mention_batch = self.embed_mentions_batch(mention_batch)
 
-        # return (left_batch, left_lengths, right_batch, right_lengths,
-        #         truewid_descvec_batch,
-        #         labels_batch, coherence_batch, wid_idxs_batch, wid_cprobs_batch)
         return (left_batch, left_lengths, right_batch, right_lengths,
                 coherence_batch, labels_batch, wid_idxs_batch,
                 wid_cprobs_batch)
-    #enddef
 
     def convert_word2idx(self, word):
         if word in self.word2idx:
@@ -389,6 +390,8 @@ class TrainingDataReader(object):
 
     def next_test_batch(self):
         return self._next_padded_batch(data_type=2)
+
+
 
 if __name__ == '__main__':
     sttime = time.time()
@@ -412,12 +415,11 @@ if __name__ == '__main__':
     total_instances = 0
     while b.tr_epochs < 1 and b.val_epochs < 1 and b.test_epochs < 1:
         (left_batch, left_lengths,
-         right_batch, right_lengths, truewid_descvec_batch,
+         right_batch, right_lengths,
          labels_batch, coherence_batch,
          wid_idxs_batch, wid_cprobs_batch) = b._next_padded_batch(data_type=0)
         total_instances += len(left_batch)
         print("Batch size: {}".format(len(left_batch)))
-
 
         # print(left_batch)
         # print(wid_idxs_batch)
@@ -436,19 +438,18 @@ if __name__ == '__main__':
         # print(titles)
         # print("\n")
 
-
         i += 1
-        if i % 1000 == 0:
+        if i % 500 == 0:
             etime = time.time()
-            t=etime-stime
+            t = etime-stime
             print("{} done. Time taken : {} seconds".format(i, t))
             break
 
 
     #endfor
-    print(len(truewid_descvec_batch))
-    print(len(truewid_descvec_batch[0]))
-    print(len(truewid_descvec_batch[0][0]))
+    # print(len(truewid_descvec_batch))
+    # print(len(truewid_descvec_batch[0]))
+    # print(len(truewid_descvec_batch[0][0]))
     etime = time.time()
     t= (etime-stime)
     tt = etime - sttime

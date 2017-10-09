@@ -13,6 +13,7 @@ from torch.autograd import Variable
 
 from utilities import utils
 from readers.train.training_reader import TrainingDataReader
+from readers.train.test_reader import TestDataReader
 from readers.config import Config
 from readers.vocabloader import VocabLoader
 from models.model import ELModel
@@ -33,12 +34,21 @@ class Trainer():
         print("[#] Launching Training Job. DeviceId : {}".format(device_id))
         self.config = Config(configpath, verbose=False)
         self.vocabloader = VocabLoader(self.config)
+        test_file = self.config.aida_kwn_dev_file
+        valbs = 2
+
         self.tr_reader = TrainingDataReader(
             config=self.config,
             vocabloader=self.vocabloader,
             val_file=self.config.aida_kwn_dev_file,
             num_cands=30,
             batch_size=bs)
+        self.test_reader = TestDataReader(
+            config=self.config,
+            vocabloader=self.vocabloader,
+            val_file=test_file,
+            num_cands=30,
+            batch_size=valbs)
 
         self.wvocab_size = len(self.tr_reader.word2idx)
         self.envocab_size = len(self.tr_reader.knwid2idx)
@@ -47,7 +57,7 @@ class Trainer():
 
         print("[#] Word Vocab : {}, Entity Vocab: {}, Type Vocab: {} "
               "CohString Vocab : {}".format(self.wvocab_size,
-              self.envocab_size, self.typevocab_size, self.cohvocab_size))
+                self.envocab_size, self.typevocab_size, self.cohvocab_size))
 
         if modeltype == 'ELModel':
             print("[#] MODEL : ELModel")
@@ -88,12 +98,13 @@ class Trainer():
         print("Press any key to run (or wait {} seconds) ... ".format(timeout))
         rlist, wlist, xlist = select.select([sys.stdin], [], [], timeout)
 
+    # @profile
     def train(self):
         # Initialize saver, model parameters (hidden inputs to lstm)
         # Load model if needed.
         self.model.train()
         start_time = time.time()
-        avg_loss = 0.0
+        avg_loss, avg_elloss, avg_mtypeloss = 0.0, 0.0, 0.0
         epochs = self.tr_reader.tr_epochs
         steps = 0
         ncorrect, ntotal = 0, 0
@@ -103,62 +114,76 @@ class Trainer():
         bestmodel, bestval, beststep = self.model, 0.0, 0
         bestFinalVal = 0.0
 
+        readtime, convtime, processtime = 0, 0, 0
+
         # while ((steps < maxsteps and bestFinalVal < 0.999) or
         #        (CURR_SWITCHES < len(CURRICULUM_ORDER) - 1)):
         while steps < maxtrsteps:
             steps += 1
             # print(curr)
+            rtimestart = time.time()
             b = self.tr_reader.next_train_batch()
             (leftb, leftlens, rightb, rightlens,
              docb, typesb, wididxsb, widprobsb) = (
                 b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7])
             (ind, vals, dvsize) = docb
+            readtime += (time.time() - rtimestart)
+            ctimestart = time.time()
             ind = torch.LongTensor(ind)
             vals = torch.FloatTensor(vals)
             docb = torch.sparse.FloatTensor(
                 ind.t(), vals, torch.Size(dvsize))
             (leftb, leftlens, rightb, rightlens,
-             typesb, wididxsb, widprobsb) = (torch.FloatTensor(leftb),
+             typesb, wididxsb, widprobsb) = (
+                torch.FloatTensor(leftb),
                 torch.LongTensor(leftlens), torch.FloatTensor(rightb),
                 torch.LongTensor(rightlens), torch.FloatTensor(typesb),
                 torch.LongTensor(wididxsb), torch.FloatTensor(widprobsb))
             (leftb, leftlens, rightb, rightlens, docb,
-             typesb, wididxsb, widprobsb) = utils.toCudaVariable(device_id,
+             typesb, wididxsb, widprobsb) = utils.toCudaVariable(
+                device_id,
                 leftb, leftlens, rightb, rightlens, docb,
                 typesb, wididxsb, widprobsb)
 
-            # print(relMatsB.size())
-            # sys.exit()
+            truewidvec = utils.toCudaVariable(device_id,
+                                              torch.LongTensor([0]*bs))[0]
+            convtime += (time.time() - ctimestart)
+            ptimestart = time.time()
+
             rets = self.model.forward_context(
                 leftb=leftb, leftlens=leftlens,
                 rightb=rightb, rightlens=rightlens,
                 docb=docb, wididxsb=wididxsb)
             (wididxscores, wididxprobs, mentype_probs) = (rets[0], rets[1],
                                                           rets[2])
-            truewidvec = utils.toCudaVariable(device_id,
-                                              torch.LongTensor([0]*bs))[0]
 
-            elloss = self.model.lossfunc(predwidscores=wididxscores,
-                                         truewidvec=truewidvec)
+            (loss, elloss, mentype_loss) = self.model.lossfunc(
+                mentype=mentype,
+                predwidscores=wididxscores, truewidvec=truewidvec,
+                mentype_probs=mentype_probs, mentype_trueprobs=typesb)
 
-
-
-            # loss = self.model.ansloss(regC=regconst, fvRegC=fvRegC,
-            #                           pOA=pOA, tOA=objAttb, maskOA=oAMask,
-            #                           pBA=pBoolA, tBA=boolb, maskBA=bAMask)
-
-            loss = elloss
             self.optstep(loss)
-            avg_loss += loss.data.cpu().numpy()[0]
+            loss = loss.data.cpu().numpy()[0]
+            elloss = elloss.data.cpu().numpy()[0]
+            mentype_loss = mentype_loss.data.cpu().numpy()[0]
+            avg_loss += loss
+            avg_elloss += elloss
+            avg_mtypeloss += mentype_loss
 
-            time_elapsed = float(time.time() - start_time)/60.0
-            print("[{}, {}, {:0.1f} mins]: {}".format(
-                 steps, self.tr_reader.tr_epochs,
-                 time_elapsed, avg_loss))
-
+            processtime += (time.time() - ptimestart)
 
             if steps % log_interval == 0:
+                totaltime = readtime + processtime + convtime
                 print()
+                avg_loss = utils.round_all(avg_loss/log_interval, 3)
+                avg_elloss = utils.round_all(avg_elloss/log_interval, 3)
+                avg_mtypeloss = utils.round_all(avg_mtypeloss/log_interval, 3)
+                print("[{}, {}, rt:{:0.1f} secs ct:{:0.1f} pt:{:0.1f} "
+                      "tt:{:0.1f} secs]: L:{} EL:{} MenTypL:{}".format(
+                        steps, self.tr_reader.tr_epochs,
+                        readtime, convtime, processtime, totaltime, avg_loss,
+                        avg_elloss, avg_mtypeloss))
+                readtime, convtime, processtime = 0, 0, 0
                 # tracc = float(ncorrect)/float(ntotal)
                 # oAtracc = float(ncorrectOA)/float(ntotalOA) if ntotalOA != 0.0 else 0.0
                 # Btracc = float(ncorrectB)/float(ntotalB) if ntotalB != 0.0 else 0.0
@@ -182,6 +207,8 @@ class Trainer():
             # if epochs != self.tr_reader.epochs or steps % 15000 == 0:
             if steps % 2000 == 0:
                 print("Saving model: {}".format(ckptpath))
+                bestmodel = copy.deepcopy(self.model)
+                beststep = steps
                 utils.save_checkpoint(m=bestmodel, o=self.optimizer,
                                       steps=steps, beststeps=beststep,
                                       path=ckptpath)
@@ -210,6 +237,86 @@ class Trainer():
 
         return (bestmodel, bestval, beststep, steps)
 
+    def validation(self):
+        # Initialize saver, model parameters (hidden inputs to lstm)
+        # Load model if needed.
+        self.model.train(False)
+        start_time = time.time()
+        avg_loss, avg_elloss, avg_mtypeloss = 0.0, 0.0, 0.0
+        epochs = self.test_reader.val_epochs
+        steps = 0
+        ncorrect, ntotal = 0, 0
+        ncorrectOA, ntotalOA = 0, 0
+        ncorrectB, ntotalB = 0, 0
+
+        bestmodel, bestval, beststep = self.model, 0.0, 0
+        bestFinalVal = 0.0
+
+        readtime, convtime, processtime = 0, 0, 0
+
+        # while ((steps < maxsteps and bestFinalVal < 0.999) or
+        #        (CURR_SWITCHES < len(CURRICULUM_ORDER) - 1)):
+        while self.test_reader.val_epochs < 1:
+            steps += 1
+            # print(curr)
+            rtimestart = time.time()
+            b = self.test_reader.next_test_batch()
+            (leftb, leftlens, rightb, rightlens,
+             docb, typesb, wididxsb, widprobsb) = (
+                b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7])
+            (ind, vals, dvsize) = docb
+            readtime += (time.time() - rtimestart)
+            ctimestart = time.time()
+            ind = torch.LongTensor(ind)
+            vals = torch.FloatTensor(vals)
+            docb = torch.sparse.FloatTensor(
+                ind.t(), vals, torch.Size(dvsize))
+            (leftb, leftlens, rightb, rightlens,
+             typesb, wididxsb, widprobsb) = (
+                torch.FloatTensor(leftb),
+                torch.LongTensor(leftlens), torch.FloatTensor(rightb),
+                torch.LongTensor(rightlens), torch.FloatTensor(typesb),
+                torch.LongTensor(wididxsb), torch.FloatTensor(widprobsb))
+            (leftb, leftlens, rightb, rightlens, docb,
+             typesb, wididxsb, widprobsb) = utils.toCudaVariable(
+                device_id,
+                leftb, leftlens, rightb, rightlens, docb,
+                typesb, wididxsb, widprobsb)
+
+            truewidvec = utils.toCudaVariable(device_id,
+                                              torch.LongTensor([0]*2))[0]
+            convtime += (time.time() - ctimestart)
+            ptimestart = time.time()
+
+            rets = self.model.forward_context(
+                leftb=leftb, leftlens=leftlens,
+                rightb=rightb, rightlens=rightlens,
+                docb=docb, wididxsb=wididxsb)
+            (wididxscores, wididxprobs, mentype_probs) = (rets[0], rets[1],
+                                                          rets[2])
+
+            (loss, elloss, mentype_loss) = self.model.lossfunc(
+                mentype=mentype,
+                predwidscores=wididxscores, truewidvec=truewidvec,
+                mentype_probs=mentype_probs, mentype_trueprobs=typesb)
+
+            loss = loss.data.cpu().numpy()[0]
+            elloss = elloss.data.cpu().numpy()[0]
+            mentype_loss = mentype_loss.data.cpu().numpy()[0]
+
+            processtime += (time.time() - ptimestart)
+
+            totaltime = readtime + processtime + convtime
+            print()
+            loss = utils.round_all(loss/log_interval, 3)
+            elloss = utils.round_all(elloss/log_interval, 3)
+            mentype_loss = utils.round_all(mentype_loss/log_interval, 3)
+            print("[{}, {}, rt:{:0.1f} secs ct:{:0.1f} pt:{:0.1f} "
+                  "tt:{:0.1f} secs]: L:{} EL:{} MenTypL:{}".format(
+                      steps, self.tr_reader.tr_epochs,
+                      readtime, convtime, processtime, totaltime, loss,
+                      elloss, mentype_loss))
+            readtime, convtime, processtime = 0, 0, 0
 
     def optstep(self, loss):
         self.optimizer.zero_grad()
@@ -264,7 +371,7 @@ if __name__ == '__main__':
                         help='Use nestrov momentum')
     parser.add_argument('--wdim', type=int, default=300,
                         help='Word embedding size')
-    parser.add_argument('--endim', type=int, default=50,
+    parser.add_argument('--endim', type=int, default=100,
                         help='Entity embedding size')
 
     parser.add_argument('--log_interval', type=int, default=100,
@@ -318,6 +425,8 @@ if __name__ == '__main__':
     entype = args.entype
     endesc = args.endesc
 
+
+
     assert modeltype in MODELTYPES, "Model type is incorrect"
 
     if torch.cuda.is_available():
@@ -352,74 +461,12 @@ if __name__ == '__main__':
         utils.save_checkpoint(m=bestmodel, o=trainer.optimizer,
                               steps=steps, beststeps=beststeps,
                               path=ckptpath)
-        print("OO-FV: {}".format(trainer.model.oofv.data.cpu().numpy()))
         pp.pprint(args)
 
     elif mode == 'val':
         utils.load_checkpoint(ckptpath, trainer.model, trainer.optimizer)
-        trainer.model.printOOFV_AOD_RNNWeights()
-        trainer.model.printWordRNNWeights('every')
-        trainer.model.printWordRNNWeights('exist')
-        trainer.initCurriculumProb()
-        trainer.curriculaProbForVal()
-        (vt, vc, va) = trainer.validation_performance()
-        print("Total: {}. Validation Acc: {}".format(vt, va))
-
-    elif mode == 'aa':
-        print("Starting Attention Analysis ...")
-        print("Loading checkpoint ...")
-        status = utils.load_checkpoint(ckptpath, trainer.model, trainer.optimizer)
-        if status == -1:
-            print("Loading Failed")
-            sys.exit()
-
-        timeout = 5
-        print("Begin Attention analysis?")
-        print("Press any key to run (or wait {} seconds) ... ".format(timeout))
-        _, _, _ = select.select([sys.stdin], [], [], timeout)
-
-        trainer.model.printOOFV_AOD_RNNWeights()
-        trainer.model.printWordERNNWeights('every')
-        trainer.model.printWordERNNWeights('exist')
-        trainer.model.printWordERNNWeights('anything')
-        trainer.model.printWordERNNWeights('purple')
-        trainer.model.printWordERNNWeights('cyan')
-        trainer.model.printWordERNNWeights('metal')
-        trainer.model.printWordERNNWeights('small')
-        trainer.model.printWordERNNWeights('sphere')
-        trainer.model.printWordRNNWeights('every')
-        trainer.model.printWordRNNWeights('exist')
-        trainer.model.printWordRNNWeights('anything')
-        trainer.model.printTopFirstLastRuleScores()
-        trainer.model.printTopPrevNextRuleScores()
-        trainer.model.printSemTypDistribution()
-
-        timeout = 5
-        print("Press any key to run (or wait {} seconds) ... ".format(timeout))
-        _, _, _ = select.select([sys.stdin], [], [], timeout)
-
-        reader = ReaderSTCurriculum(
-            questions_pkl=val_ques_pkl, scenes_pkl=val_scenes_pkl,
-            qword_vocab_pkl=qwvocab_pkl,
-            semtyp_vocab_pkl=semtypvocab_pkl, relword_vocab_pkl=rwvocab_pkl,
-            sceneword_vocab_pkl=swvocab_pkl, batchsize=1)
-
-        # reader = ReaderST(
-        #     questions_pkl=val_ques_pkl, scenes_pkl=val_scenes_pkl,
-        #     qword_vocab_pkl=qwvocab_pkl,
-        #     semtyp_vocab_pkl=semtypvocab_pkl,
-        #     sceneword_vocab_pkl=swvocab_pkl, batchsize=1)
-        # obj_attention_st.treeAttentionAnalysis(
-        #     reader, trainer.model, device_id)
-        obj_attention_pcfg.treeAttentionAnalysis(
-            reader, trainer.model, device_id)
-        print("OO-FV: {}".format(trainer.model.oofv.data.cpu().numpy()))
-        #obj_attention.singleAttentionAnalysis(reader, trainer.model, device_id)
-
-    # print(trainer.model.objatt_comp.state_dict())
-    # print(trainer.model.rnn_cell.state_dict())
-    # print(trainer.model.w1)
-    # print(trainer.model.w2)
-    # print(trainer.model.bias)
+        trainer.validation()
+        # (vt, vc, va) = trainer.validation_performance()
+        # print("Total: {}. Validation Acc: {}".format(vt, va))
 
     sys.exit()

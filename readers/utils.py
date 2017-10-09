@@ -14,7 +14,7 @@ from readers.Mention import Mention
 
 def save(fname, obj):
     with open(fname, 'wb') as f:
-        pickle.dump(obj, f)
+        pickle.dump(obj, f, protocol=4)
 
 def load(fname):
     with open(fname, 'rb') as f:
@@ -78,7 +78,7 @@ def make_mentions_from_file(mens_file, verbose=False):
         mentions = []
         for line in mention_lines:
             mentions.append(Mention(line))
-            ttime = (time.time() - stime)
+    ttime = (time.time() - stime)
     if verbose:
         print(" ## Time in loading {} mens : {} secs".format(mens_file, ttime))
     return mentions

@@ -93,14 +93,14 @@ class ContextEncoder(nn.Module):
                     self.zero_hid(1, bs, lstm.hidden_size))
 
         sortedlens, sortedidxs = torch.sort(lens, dim=0, descending=True)
-        _, originalidxs = torch.sort(sortedidxs, dim=0)
-
         x = x[sortedidxs.data]
         packed_x = packseq(x, list(sortedlens.data), batch_first=True)
         # Forward propagate RNN
         out, (h, c) = lstm(packed_x, (h0, c0))
         h = h.squeeze(0)
-        oridx = originalidxs.view(-1, 1).expand(bs, h.size(-1))
-        lstm_output_h = h.gather(0, oridx)
+        h_unsort = self._cuda(Variable(h.data.new(*h.data.size())))
 
-        return lstm_output_h
+        soridx2d = sortedidxs.unsqueeze(1).expand(h_unsort.size())
+        h_unsort = h_unsort.scatter_(0, soridx2d, h)
+
+        return h_unsort

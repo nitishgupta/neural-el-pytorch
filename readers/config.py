@@ -18,6 +18,7 @@ class Config(object):
 
         self.wiki_mentions_dir = d['wiki_mentions_dir']
         self.train_mentions_dir = d['train_mentions_dir']
+        self.newtrain_mentions_dir = d['newtrain_mentions_dir']
         self.val_mentions_dir = d['val_mentions_dir']
         self.val_mentions_file = d['val_mentions_file']
         if 'test_mentions_dir' in d.keys():
@@ -51,6 +52,7 @@ class Config(object):
         self.test_allen_cwikis_pkl = d['test_allen_cwikis_pkl']
         # TestDatasets pruned crosswikis only containing known entities (readers.test.test_crosswikis_vocabs)
         self.test_kwnen_cwikis_pkl = d['test_kwnen_cwikis_pkl']
+        self.test_kwnen_cands_pkl = d['test_kwnen_cands_pkl']
 
         if 'knownwid2descvectors' in d.keys():
             self.knownwid2descvectors = d['knownwid2descvectors']
@@ -60,6 +62,7 @@ class Config(object):
         self.word2vec_bin_gz = d['word2vec_bin_gz']
         self.glove_pkl = d['glove_pkl']
         self.glove_word_vocab_pkl = d['glove_word_vocab_pkl']
+        self.glove_numpy_pkl = d['glove_numpy_pkl']
 
         self.datasets_dir = d['datasets_dir']
         self.ace_mentions_file = d['ace_mentions_file']

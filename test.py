@@ -94,7 +94,7 @@ if __name__=='__main__':
         cands = Variable(torch.LongTensor(cands))
         cands = cands.cuda(0)
 
-        ind = [[random.randint(0, bs-1), random.randint(0, numwords-1)] for j in range(0,10000)]
+        ind = [[random.randint(0, bs-1), random.randint(0, numwords-1)] for j in range(0,100000)]
         numelems =  len(ind)
         ind = torch.LongTensor(ind)
         v = torch.FloatTensor([random.random() for j in range(0, numelems)])

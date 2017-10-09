@@ -27,7 +27,9 @@ class VocabLoader(object):
         self.wid2Wikititle = None
         self.wid2TypeLabels = None
         (self.test_knwen_cwikis, self.test_allen_cwikis) = (None, None)
+        self.test_kwnen_cands_dict = None
         self.glove2vec = None
+        self.glovenumpy = None
         self.knownwid2descvecs = None
         self.crosswikis_pruned = None
 
@@ -62,6 +64,15 @@ class VocabLoader(object):
                 sys.exit()
             self.trval_cands_dict = utils.load(self.config.trval_kwnidx_cands_pkl)
         return self.trval_cands_dict
+
+    def getTestCandidateDict(self):
+        if self.test_kwnen_cands_dict is None:
+            if not os.path.exists(self.config.test_kwnen_cands_pkl):
+                print("Train Validation Candidate Dict missing")
+                sys.exit()
+            self.test_kwnen_cands_dict = utils.load(
+                self.config.test_kwnen_cands_pkl)
+        return self.test_kwnen_cands_dict
 
     def getTestKnwEnCwiki(self):
         if self.test_knwen_cwikis == None:
@@ -102,6 +113,15 @@ class VocabLoader(object):
                 sys.exit()
             self.glove2vec = utils.load(self.config.glove_pkl)
         return self.glove2vec
+
+
+    def loadGloveNumpy(self):
+        if self.glovenumpy is None:
+            if not os.path.exists(self.config.glove_numpy_pkl):
+                print("Glove_Numpy doesnot exist")
+                sys.exit()
+            self.glovenumpy = utils.load(self.config.glove_numpy_pkl)
+        return self.glovenumpy
 
     def getGloveWordVocab(self):
         if self.gword2idx == None or self.gidx2word == None:

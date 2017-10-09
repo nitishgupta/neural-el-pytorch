@@ -23,10 +23,10 @@ class ELModel(nn.Module):
         self.envocabsize = len(self.knwid2idx)
         (self.cohstr2idx, self.idx2cohstr) = cohvocab
         self.numcohstrs = len(self.cohstr2idx)
-        (self.typ2idx, self.idx2typ) = cohvocab
+        (self.typ2idx, self.idx2typ) = typevocab
         self.numtypes = len(self.typ2idx)
-        self.numcands = num_cands
 
+        self.numcands = num_cands
         self.edim = edim
         self.wdim = wdim
 
@@ -70,17 +70,15 @@ class ELModel(nn.Module):
         right_lens = kargs['rightlens']
         sparse_doc_vecs = kargs['docb']
         cand_entities = kargs['wididxsb']   # [B, C]
-        bs = left_context.size()[0]
+        bs = cand_entities.size()[0]
 
         # [B, H]
-        '''
         context_encoded = self.contextencoder.forward(
             left_input=left_context, right_input=right_context,
             left_lens=left_lens, right_lens=right_lens,
             doc_input=sparse_doc_vecs)
-        '''
-        context_encoded = Variable(torch.randn(bs, self.edim))
-        context_encoded = context_encoded.cuda(0)
+        # context_encoded = Variable(torch.randn(bs, self.edim))
+        # context_encoded = context_encoded.cuda(0)
 
         # [B, T]
         mentype_probs = self.typeencoder.forward(context_encoded)
@@ -99,13 +97,24 @@ class ELModel(nn.Module):
         # [B, C]
         cand_en_probs = F.softmax(cand_en_scores)
 
+        # return (cand_en_scores, cand_en_probs)
         return (cand_en_scores, cand_en_probs, mentype_probs)
 
 
-    def lossfunc(self, **kargs):
+    def lossfunc(self, mentype, **kargs):
         predwidscores = kargs['predwidscores']
         truewidvec = kargs['truewidvec']
+        mentype_predprobs = kargs['mentype_probs']
+        mentype_trueprobs = kargs['mentype_trueprobs']
+
+        if mentype:
+            mentype_loss = F.binary_cross_entropy(mentype_predprobs,
+                                                  mentype_trueprobs)
+        else:
+            mentype_loss = self._cuda(Variable(torch.Tensor([0.0])))
 
         elloss = F.cross_entropy(input=predwidscores, target=truewidvec)
 
-        return elloss
+        loss = elloss + mentype_loss
+
+        return (loss, elloss, mentype_loss)

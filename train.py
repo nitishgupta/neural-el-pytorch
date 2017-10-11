@@ -12,6 +12,7 @@ import torch.nn as nn
 from torch.autograd import Variable
 
 from utilities import utils
+from utilities import evaluation
 from readers.train.training_reader import TrainingDataReader
 from readers.train.test_reader import TestDataReader
 from readers.config import Config
@@ -42,13 +43,15 @@ class Trainer():
             vocabloader=self.vocabloader,
             val_file=self.config.aida_kwn_dev_file,
             num_cands=30,
-            batch_size=bs)
+            batch_size=bs,
+            wordDropoutKeep=worddropout, cohDropoutKeep=cohdropout)
         self.test_reader = TestDataReader(
             config=self.config,
             vocabloader=self.vocabloader,
             val_file=test_file,
             num_cands=30,
-            batch_size=valbs)
+            batch_size=valbs,
+            wordDropoutKeep=1.0, cohDropoutKeep=1.0)
 
         self.wvocab_size = len(self.tr_reader.word2idx)
         self.envocab_size = len(self.tr_reader.knwid2idx)
@@ -205,13 +208,15 @@ class Trainer():
                 # ncorrectB = 0
 
             # if epochs != self.tr_reader.epochs or steps % 15000 == 0:
-            if steps % 2000 == 0:
+            if steps % 1000 == 0:
+                print("Running Validation")
                 print("Saving model: {}".format(ckptpath))
                 bestmodel = copy.deepcopy(self.model)
                 beststep = steps
                 utils.save_checkpoint(m=bestmodel, o=self.optimizer,
                                       steps=steps, beststeps=beststep,
                                       path=ckptpath)
+                self.validation()
                 # (vt, vc, va) = self.validation_performance()
                 # if va > bestval:
                 #     bestval = va
@@ -234,13 +239,14 @@ class Trainer():
                 #                       steps=steps, beststeps=beststep,
                 #                       path=ckptpath)
                 # epochs = self.tr_reader.epochs
+                self.model.train()
 
         return (bestmodel, bestval, beststep, steps)
 
     def validation(self):
         # Initialize saver, model parameters (hidden inputs to lstm)
         # Load model if needed.
-        self.model.train(False)
+        self.model.eval()
         start_time = time.time()
         avg_loss, avg_elloss, avg_mtypeloss = 0.0, 0.0, 0.0
         epochs = self.test_reader.val_epochs
@@ -254,8 +260,14 @@ class Trainer():
 
         readtime, convtime, processtime = 0, 0, 0
 
+        candidatesIdxs = []
+        contextProbs = []
+        priorProbs = []
+
+
         # while ((steps < maxsteps and bestFinalVal < 0.999) or
         #        (CURR_SWITCHES < len(CURRICULUM_ORDER) - 1)):
+        self.test_reader.reset_validation()
         while self.test_reader.val_epochs < 1:
             steps += 1
             # print(curr)
@@ -306,17 +318,22 @@ class Trainer():
 
             processtime += (time.time() - ptimestart)
 
+            candidatesIdxs.extend(utils.tocpuNPList(wididxsb))
+            contextProbs.extend(utils.tocpuNPList(wididxprobs))
+            priorProbs.extend(utils.tocpuNPList(widprobsb))
+
             totaltime = readtime + processtime + convtime
-            print()
-            loss = utils.round_all(loss/log_interval, 3)
-            elloss = utils.round_all(elloss/log_interval, 3)
-            mentype_loss = utils.round_all(mentype_loss/log_interval, 3)
-            print("[{}, {}, rt:{:0.1f} secs ct:{:0.1f} pt:{:0.1f} "
-                  "tt:{:0.1f} secs]: L:{} EL:{} MenTypL:{}".format(
-                      steps, self.tr_reader.tr_epochs,
-                      readtime, convtime, processtime, totaltime, loss,
-                      elloss, mentype_loss))
+            # print()
+            # print("[{}, {}, rt:{:0.1f} secs ct:{:0.1f} pt:{:0.1f} "
+            #       "tt:{:0.1f} secs]: L:{} EL:{} MenTypL:{}".format(
+            #           steps, self.tr_reader.tr_epochs,
+            #           readtime, convtime, processtime, totaltime, loss,
+            #           elloss, mentype_loss))
             readtime, convtime, processtime = 0, 0, 0
+
+        evaluation.elEval(candidatesIdxs, priorProbs, contextProbs,
+                          self.tr_reader.idx2knwid,
+                          self.tr_reader.wid2WikiTitle)
 
     def optstep(self, loss):
         self.optimizer.zero_grad()
@@ -329,11 +346,15 @@ class Trainer():
 def getCkptName(rootname):
     ckptname = rootname
     ckptname += '_s' + str(seed)    # Seed
-    ckptname += '_wdim_' + str(wdim)    # gradient clip threshold
-    ckptname += '_lr' + str(lr)    # learningRate
     ckptname += '_bs' + str(bs)    # BatchSize
+    ckptname += '_opt' + str(optim)    # BatchSize
+    ckptname += '_lr' + str(lr)    # learningRate
+    ckptname += '_Wd_' + str(wdim)    # gradient clip threshold
+    ckptname += '_Ed_' + str(endim)    # gradient clip threshold
+    ckptname += '_drop_' + str(dropout)    # gradient clip threshold
+    ckptname += '_Wdrop_' + str(worddropout)    # gradient clip threshold
+    ckptname += '_Cdrop_' + str(cohdropout)    # gradient clip threshold
     ckptname += '_clip_' + str(clip)    # gradient clip threshold
-    ckptname += '_endim_' + str(endim)    # gradient clip threshold
     ckptname += '_mentype_' + str(mentype)    # gradient clip threshold
     ckptname += '_entype_' + str(entype)    # gradient clip threshold
     ckptname += '_endesc_' + str(endesc)    # gradient clip threshold
@@ -361,9 +382,9 @@ if __name__ == '__main__':
                         help='Learning Rate')
 
     parser.add_argument('--bs', type=int, default=4)
-    parser.add_argument('--dropout', type=float, default=0.0)
-    parser.add_argument('--worddropout', type=float, default=0.4)
-    parser.add_argument('--cohdropout', type=float, default=0.6)
+    parser.add_argument('--dropout', type=float, default=0.4)
+    parser.add_argument('--worddropout', type=float, default=0.6)
+    parser.add_argument('--cohdropout', type=float, default=0.4)
     parser.add_argument('--init_range', type=float, default=0.001)
     parser.add_argument('--momentum', type=float, default=0.0,
                         help='Momentum for SGD')

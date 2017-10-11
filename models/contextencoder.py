@@ -34,6 +34,7 @@ class ContextEncoder(nn.Module):
         super(ContextEncoder, self).__init__()
         self.device_id = device_id
         self.dropoutlayer = nn.Dropout(dropout)
+        self.relu = nn.ReLU()
         self.doccontextinsize = doccontextinsize
         self.hdim = contextdim
 
@@ -66,21 +67,28 @@ class ContextEncoder(nn.Module):
 
     def forward(self, left_input, right_input, left_lens, right_lens,
                 doc_input):
-        bs = left_input.size()[0]
+        left_input = self.dropoutlayer(left_input)
+        right_input = self.dropoutlayer(right_input)
+
         left_encoded = self._getLastLSTMOutput(self.leftlstm,
                                                left_input, left_lens)
         right_encoded = self._getLastLSTMOutput(self.rightlstm,
                                                 right_input, right_lens)
 
         locallstm_cat = torch.cat((left_encoded, right_encoded), 1)  # [B, 2H]
+        locallstm_cat = self.dropoutlayer(locallstm_cat)
+
         local_encoded = self.localcontextff(locallstm_cat)  # [B, H]
+        local_encoded = self.dropoutlayer(local_encoded)
 
         # doc_input : sparse [B, D] , self.docencodemat: dense [D, H]
-        # doc_encoded = torch.mm(doc_input, self.docencodemat)    # [B, H]
+        doc_encoded = torch.mm(doc_input, self.docencodemat)    # [B, H]
 
-        # contextff_in = torch.cat((local_encoded, doc_encoded), 1)    # [B, H]
-        #
-        # context_encoded = self.contextmergeff(contextff_in)
+        contextff_in = torch.cat((local_encoded, doc_encoded), 1)    # [B, 2H]
+        contextff_in = self.dropoutlayer(contextff_in)
+        contextff_in = self.relu(contextff_in)
+
+        context_encoded = self.contextmergeff(contextff_in)
         context_encoded = local_encoded
 
         return context_encoded

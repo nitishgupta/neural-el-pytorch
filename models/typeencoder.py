@@ -59,6 +59,8 @@ class TypeEncoder(nn.Module):
         inputsize = input_vecs.size()
         bs = inputsize[0]
         hsize = inputsize[1]
+
+        input_vecs = self.dropoutlayer(input_vecs)
         input_vecs = input_vecs.unsqueeze(1).expand(bs, self.numtypes, hsize)
         typeembeds = typeembeds.unsqueeze(0).expand(bs, self.numtypes, hsize)
 

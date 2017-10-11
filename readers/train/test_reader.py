@@ -13,8 +13,7 @@ end_word = "<eos>"
 
 random.seed(1)
 
-
-class TrainingDataReader(object):
+class TestDataReader(object):
     def __init__(self, config, vocabloader,
                  val_file,
                  num_cands, batch_size,
@@ -86,32 +85,19 @@ class TrainingDataReader(object):
 
         # Train / Validation Candidates : 30 per mention
         # {(lnrm(surface), wid): ([cand_wid_idxs], [prior_probs])}
-        self.trval_cands_dict = vocabloader.getTrainValCandidateDict()
+        self.test_cands_dict = vocabloader.getTestCandidateDict()
         print("[#] Size of Train Cands Dict: {}".format(
-            len(self.trval_cands_dict)))
+            len(self.test_cands_dict)))
 
-        self.tr_mens_dir = config.train_mentions_dir
-        self.tr_mens_files = utils.get_mention_files(self.tr_mens_dir)
-        self.num_tr_mens_files = len(self.tr_mens_files)
-        print("[#] Training Mention Files : {} files".format(
-            self.num_tr_mens_files))
+        print("[#] Test Mentions File : {}".format(val_file))
 
-        print("[#] Validation Mentions File : {}".format(val_file))
-
-        self.tr_mentions = []
-        self.tr_men_idx = 0
-        self.num_tr_mens = 0
-        self.tr_fnum = 0
-        self.tr_epochs = 0
-
-        print("[#] Pre-loading validation mentions ... ")
-        self.val_mentions = utils.make_mentions_from_file(
+        print("[#] Pre-loading test mentions ... ")
+        self.test_mentions = utils.make_mentions_from_file(
             val_file, verbose=True)
         self.val_men_idx = 0
-        self.num_val_mens = len(self.val_mentions)
+        self.num_val_mens = len(self.test_mentions)
         self.val_epochs = 0
-        self.test_epochs = 0
-        print("[#] Validation Mentions : {}".format(self.num_val_mens))
+        print("[#] Number of Test Mentions: {}".format(self.num_val_mens))
 
         if self.pretrain_wordembed:
             vtime = time.time()
@@ -123,7 +109,7 @@ class TrainingDataReader(object):
 
         etime = time.time()
         ttime = etime - stime
-        print("[#] TRAINING READER LOADING COMPLETE. "
+        print("[#] TEST READER LOADING COMPLETE. "
               "Time Taken: {} secs\n".format(ttime))
 
     def load_mentions_from_file(self, data_idx=0):
@@ -151,37 +137,17 @@ class TrainingDataReader(object):
 
     def reset_validation(self):
         self.val_men_idx = 0
-        self.test_men_idx = 0
         self.val_epochs = 0
-        self.test_epochs = 0
 
-    def _read_mention(self, data_type=0):
-        # Read train mention
-        if data_type == 0 or data_type=="tr":
-            # If all mentions read or no ments in memory
-            if self.tr_men_idx == self.num_tr_mens or self.num_tr_mens == 0:
-                self.load_mentions_from_file(data_type)
-            mention = self.tr_mens[self.tr_men_idx]
-            self.tr_men_idx += 1
-            return mention
+    def _read_mention(self, data_type=1):
         # Read val mention
         if data_type == 1 or data_type == "val":
-            mention = self.val_mentions[self.val_men_idx]
+            mention = self.test_mentions[self.val_men_idx]
             self.val_men_idx += 1
             if self.val_men_idx == self.num_val_mens:
                 self.val_epochs += 1
                 self.val_men_idx = 0
             return mention
-        '''
-        # Read test mention
-        if data_type == 2 or data_type == "test":
-            mention = self.test_mentions[self.test_men_idx]
-            self.test_men_idx += 1
-            if self.test_men_idx == self.num_test_mens:
-                self.test_epochs += 1
-                self.test_men_idx = 0
-            return mention
-        '''
         print("Wrong data_type arg. Quitting ... ")
         sys.exit(0)
     # enddef
@@ -278,7 +244,7 @@ class TrainingDataReader(object):
             # Candidate WID_Idxs and Prior Probabilities
             cands_dict_key = (utils._getLnrm(m.surface),
                               m.wid)
-            (wid_idxs, wid_cprobs) = self.trval_cands_dict[cands_dict_key]
+            (wid_idxs, wid_cprobs) = self.test_cands_dict[cands_dict_key]
 
             wid_idxs_batch.append(wid_idxs)
             wid_cprobs_batch.append(wid_cprobs)
@@ -316,18 +282,6 @@ class TrainingDataReader(object):
             if neg != knwn_ent_idx:
                 neg_ents.append(neg)
         return neg_ents
-
-    # def embed_batch(self, batch):
-    #     ''' Input is a padded batch of left or right contexts containing words
-    #     Dimensions should be [B, padded_length]
-    #     Output:
-    #       Embed the word idxs using pretrain word embedding
-    #     '''
-    #     output_batch = []
-    #     for sent in batch:
-    #         word_embeddings = [self.get_vector(word) for word in sent]
-    #         output_batch.append(word_embeddings)
-    #     return output_batch
 
     def embed_batch(self, batch):
         ''' Input is a padded batch of left or right contexts containing
@@ -383,42 +337,35 @@ class TrainingDataReader(object):
         else:
             return self.word2idx[self.unk_word]
 
-    def next_train_batch(self):
-        return self._next_padded_batch(data_type=0)
-
-    def next_val_batch(self):
-        return self._next_padded_batch(data_type=1)
-
     def next_test_batch(self):
-        return self._next_padded_batch(data_type=2)
-
+        return self._next_padded_batch(data_type=1)
 
 
 if __name__ == '__main__':
     sttime = time.time()
-    batch_size = 1000
+    batch_size = 10
     num_batch = 10
     configpath = "configs/config.ini"
     config = Config(configpath)
     vocabloader = VocabLoader(config)
-    b = TrainingDataReader(config=config,
-                           vocabloader=vocabloader,
-                           val_file=config.aida_kwn_dev_file,
-                           num_cands=30,
-                           batch_size=batch_size,
-                           strict_context=False,
-                           pretrain_wordembed=False,
-                           wordDropoutKeep=0.6,
-                           cohDropoutKeep=0.4)
+    b = TestDataReader(config=config,
+                       vocabloader=vocabloader,
+                       val_file=config.aida_kwn_dev_file,
+                       num_cands=30,
+                       batch_size=batch_size,
+                       strict_context=False,
+                       pretrain_wordembed=False,
+                       wordDropoutKeep=0.6,
+                       cohDropoutKeep=0.4)
 
     stime = time.time()
     i = 0
     total_instances = 0
-    while b.tr_epochs < 1 and b.val_epochs < 1 and b.test_epochs < 1:
+    while b.val_epochs < 1:
         (left_batch, left_lengths,
          right_batch, right_lengths,
          labels_batch, coherence_batch,
-         wid_idxs_batch, wid_cprobs_batch) = b._next_padded_batch(data_type=0)
+         wid_idxs_batch, wid_cprobs_batch) = b._next_padded_batch(data_type=1)
         total_instances += len(left_batch)
         print("Batch size: {}".format(len(left_batch)))
 

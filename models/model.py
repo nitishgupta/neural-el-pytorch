@@ -32,6 +32,7 @@ class ELModel(nn.Module):
 
         self.init_range = init_range
         self.dropout = dropout
+        self.dropout_layer = nn.Dropout(self.dropout)
 
         ''' Entity Representations '''
         self.entityembeds = nn.Embedding(self.envocabsize, self.edim,
@@ -85,8 +86,9 @@ class ELModel(nn.Module):
 
         # [B, C, H]
         cand_entities_embed = self.entityembeds(cand_entities)
+        cand_entities_embed = self.dropout_layer(cand_entities_embed)
 
-
+        context_encoded = self.dropout_layer(context_encoded)
         context_encoded_expanded = context_encoded.unsqueeze(1).expand(
             bs, self.numcands, self.edim)
 
